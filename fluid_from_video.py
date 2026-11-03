@@ -3,14 +3,14 @@ Video-driven WebGL Fluid Simulation - Python port
 Original: Copyright (c) 2017 Pavel Dobryakov (MIT License)
 Ported to Python/moderngl, extended to be driven by an input video.
 
-動画の「黒い部分」を流体の領域として切り抜き、
-「動いている境界（エッジ）」が流体を押す／かき混ぜる。
-  - 黒   : 流体が存在する領域
-  - 白   : WHITE_MODE='solid'    -> 流体が入れない壁（動く壁として流体を押す）。
-                                    表示は真っ黒。ただし周囲の流体の発光(bloom)だけ壁に染み出す
-           WHITE_MODE='boundary' -> 壁にはならず、境界の動きだけが流体に作用
-  - グレー: 反応が弱くなる（GRAY_POWER で調整）
-出力の解像度は入力動画と同じ。FPS は OUTPUT_FPS / --fps で指定。
+Cuts out the "black parts" of the video as the fluid region,
+and the "moving boundaries (edges)" push/stir the fluid.
+  - Black : Region where fluid exists
+  - White : WHITE_MODE='solid'    -> Wall that fluid cannot enter (acts as a moving wall that pushes the fluid).
+                                     Displayed as pure black. However, only the surrounding fluid's glow (bloom) bleeds through the wall.
+           WHITE_MODE='boundary' -> Not a wall; only the boundary movement affects the fluid.
+  - Gray  : Reaction becomes weaker (adjusted by GRAY_POWER)
+Output resolution is the same as the input video. FPS is specified by OUTPUT_FPS / --fps.
 
 Usage:
     python fluid_from_video.py input.mp4 -o out.mp4 --fps 30 --white-mode solid
@@ -29,36 +29,36 @@ import imageio.v2 as imageio
 # Configuration
 # ----------------------------------------------------------------------------
 CONFIG = dict(
-    # ---- 入出力 -------------------------------------------------------------
+    # ---- Input/Output -------------------------------------------------------
     INPUT_FILE=r"input.mp4",
     OUTPUT_FILE="fluid_output.mp4",
-    OUTPUT_FPS=60,            # None = 元動画と同じFPS
-    OUTPUT_QUALITY=9,           # 0-10 (imageio-ffmpeg)。高いほど高画質
+    OUTPUT_FPS=60,            # None = same as source video FPS
+    OUTPUT_QUALITY=9,           # 0-10 (imageio-ffmpeg). Higher is better quality
 
-    # ---- 動画連動の設定 -----------------------------------------------------
-    WHITE_MODE="boundary",         # 'solid'    : 白い部分は流体が入れない壁 (表示は黒、光だけ染み出す)
-                                # 'boundary' : 白い部分は壁にならず、境界の動きにだけ反応
-    SOLID_THRESHOLD=0.5,        # 輝度がこれ以上なら「白（壁）」とみなす (solid時)
-    GRAY_POWER=2.0,             # 大きいほどグレー(低コントラスト)の反応が弱くなる。0で白黒と同じ
-    NOISE_FLOOR=0.005,           # 動画ノイズを動きとみなさないための輝度差の下限
-    MAX_DISPLACEMENT=15.0,       # 1フレームあたりの境界移動量の上限 (シム解像度でのテクセル)
-    FORCE_SCALE=5.0,            # 境界の動きが流体速度に与える強さ(押し出しの強さ)
-    FORCE_RATE=60.0,            # 境界の動きに流体速度が追従する速さ (1/秒)
-    EMIT_DYE=True,              # 動く境界から色を出す
-    EMIT_RATE=150.0,             # 色の出る量 (旧4.0では暗すぎて見えなかった)
-    EMIT_SPEED_REF=1.0,        # この速度(テクセル/秒)で色の出る量が最大になる
-    EMIT_MAX=0.8,               # 染料の明るさの上限 (溜まりすぎ防止)
-    WALL_GLOW=1.0,              # solid時: 白い部分へ染み出す光(bloom)の強さ。0で完全な黒
-    CLIP_TO_BLACK=True,         # True: 黒い部分にだけ流体を表示 (白は切り抜かれる)
-    BACKGROUND="video",         # boundaryモード時の切り抜かれた部分: 'video'=元動画 / 'color'=BG_COLOR
-                                # (solidモードでは常に黒)
+    # ---- Video-linked settings ----------------------------------------------
+    WHITE_MODE="boundary",         # 'solid'    : White parts are walls fluid cannot enter (displayed black, only light bleeds through)
+                                # 'boundary' : White parts are not walls; only react to boundary movement
+    SOLID_THRESHOLD=0.5,        # Luminance at or above this is considered "white (wall)" (when solid)
+    GRAY_POWER=2.0,             # Higher makes gray (low contrast) reaction weaker. 0 = same as black/white
+    NOISE_FLOOR=0.005,           # Lower limit of luminance difference to not treat video noise as motion
+    MAX_DISPLACEMENT=15.0,       # Maximum boundary movement per frame (texels at sim resolution)
+    FORCE_SCALE=5.0,            # Strength of boundary movement's effect on fluid velocity (push strength)
+    FORCE_RATE=60.0,            # Speed at which fluid velocity follows boundary movement (1/sec)
+    EMIT_DYE=True,              # Emit color from moving boundaries
+    EMIT_RATE=150.0,             # Amount of color emitted (old 4.0 was too dark to see)
+    EMIT_SPEED_REF=1.0,        # Speed (texels/sec) at which color emission reaches maximum
+    EMIT_MAX=0.8,               # Maximum dye brightness (prevents accumulation)
+    WALL_GLOW=1.0,              # When solid: strength of light (bloom) bleeding into white parts. 0 = pure black
+    CLIP_TO_BLACK=True,         # True: Display fluid only in black parts (white is cut out)
+    BACKGROUND="video",         # Background of cut-out parts in boundary mode: 'video'=source video / 'color'=BG_COLOR
+                                # (always black in solid mode)
     BG_COLOR=(255, 255, 255),
-    INITIAL_SPLATS=8,           # 最初に黒い部分へ散らす色の数
-    SUBSTEPS=1,                 # 1フレームあたりのシミュレーション分割数 (低FPS時に増やすと安定)
+    INITIAL_SPLATS=8,           # Number of colors initially scattered into black parts
+    SUBSTEPS=1,                 # Number of simulation subdivisions per frame (increase for stability at low FPS)
 
-    # ---- 流体シミュレーション (元コードと同じ) -------------------------------
-    SIM_RESOLUTION=256,         # 境界を追従させるため元(128)より高め
-    DYE_RESOLUTION=None,        # None = 元動画の解像度に合わせる
+    # ---- Fluid simulation (same as original code) ---------------------------
+    SIM_RESOLUTION=256,         # Higher than original (128) to track boundaries
+    DYE_RESOLUTION=None,        # None = match source video resolution
     DENSITY_DISSIPATION=1.2,
     VELOCITY_DISSIPATION=0.15,
     PRESSURE=0.8,
@@ -78,7 +78,7 @@ CONFIG = dict(
     SUNRAYS=True,
     SUNRAYS_RESOLUTION=196,
     SUNRAYS_WEIGHT=1.0,
-    BACK_COLOR=(0, 0, 0),       # 流体の背面色 (0-255)
+    BACK_COLOR=(0, 0, 0),       # Fluid background color (0-255)
 )
 
 # ----------------------------------------------------------------------------
